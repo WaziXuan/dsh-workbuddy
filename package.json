@@ -55,5 +55,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "scripts": {
+    "test": "node --test test/pool-abort.test.mjs"
   }
 }
