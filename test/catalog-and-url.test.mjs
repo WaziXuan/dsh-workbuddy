@@ -34,6 +34,17 @@ test('非空 modelFilter 无匹配时返回空，不再静默放大成全部模�
   assert.deepEqual(selectModels(models, ['missing']), [])
 })
 
+test('账号身份按 uid + 企业 ID 稳定，token 轮换不换 route', () => {
+  const first = normalizeAccount({ accessToken: 'a'.repeat(32), uid: 'same-uid', enterpriseId: 'tenant-1' }, 0)
+  const rotated = normalizeAccount({ accessToken: 'b'.repeat(32), uid: 'same-uid', enterpriseId: 'tenant-1' }, 0)
+  const otherTenant = normalizeAccount({ accessToken: 'a'.repeat(32), uid: 'same-uid', enterpriseId: 'tenant-2' }, 0)
+  assert.equal(first.ok, true)
+  assert.equal(rotated.ok, true)
+  assert.equal(otherTenant.ok, true)
+  assert.equal(rotated.account.route, first.account.route)
+  assert.notEqual(otherTenant.account.route, first.account.route)
+})
+
 test('完整 chat URL 与尾斜杠 baseURL 都归一到 API 根', () => {
   const source = { accessToken: 'x'.repeat(32), uid: 'uid-1' }
   const fromChatUrl = normalizeAccount({ ...source, baseURL: 'https://copilot.tencent.com/v2/chat/completions' }, 0)

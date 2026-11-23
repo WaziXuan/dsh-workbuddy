@@ -189,6 +189,28 @@ test('并发 remove + test 串行执行，删除不会覆盖刚写入的测试�
   }
 })
 
+test('同 uid 换 token 沿用旧 route，不会在池里留下重复账号', async () => {
+  const existing = account('wb-legacy01', 'stable-uid')
+  existing.token = 'old-token-for-stable-uid-0001'
+  const env = await bootstrap({
+    accounts: [existing],
+    fetchImpl: async () => new Response(JSON.stringify({ code: 0, data: { TotalCredits: 100 } }), { status: 200 }),
+  })
+  try {
+    for (let i = 0; i < 50 && env.mutations.length === 0; i += 1) await sleep(20)
+    const response = await env.call('/workbuddy/import', {
+      text: JSON.stringify({ accessToken: 'new-token-for-stable-uid-0001', uid: 'stable-uid', name: 'rotated' }),
+    })
+    assert.equal(response.status, 200)
+    const stored = JSON.parse(fs.readFileSync(env.file, 'utf8'))
+    assert.equal(stored.accounts.length, 1)
+    assert.equal(stored.accounts[0].route, 'wb-legacy01')
+    assert.equal(stored.accounts[0].token, 'new-token-for-stable-uid-0001')
+  } finally {
+    await env.finish()
+  }
+})
+
 test('删除最后一个账号后 pool URL、provider 与凭据一起清空', async () => {
   const only = account('wb-cccccccc')
   const env = await bootstrap({ accounts: [only] })
