@@ -173,3 +173,20 @@ test('探针半开：保留 system 补位，跳过注入，不计 rewrites', asy
     globalThis.fetch = realFetch
   }
 })
+
+test('下游请求失败只发一次，不静默重发', async () => {
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; throw new Error('upstream boom') }
+  const guard = installFetchGuard(QUIET_LOGGER, {})
+  try {
+    await assert.rejects(() => fetch(TARGET, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': 'deepseek-harness/0.2.1' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+    }), /upstream boom/)
+    assert.equal(calls, 1, '下游失败后不能重发原始请求')
+  } finally {
+    guard.dispose()
+    globalThis.fetch = realFetch
+  }
+})
