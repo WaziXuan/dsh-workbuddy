@@ -102,3 +102,14 @@ test('整个文件是加密信封时给出可操作提示', () => {
   assert.equal(result.ok, false)
   assert.match(result.reason, /加密信封/)
 })
+
+test('允许直接粘贴裸 token 或 Authorization 请求头', () => {
+  const jwt = `eyJhbGciOiJIUzI1NiJ9.${'a'.repeat(30)}.${'b'.repeat(20)}`
+  const bare = collectAccountObjects(jwt)
+  assert.equal(bare.length, 1)
+  assert.equal(normalizeAccount(bare[0], 0).ok, true)
+
+  const fromHeader = collectAccountObjects(`Authorization: Bearer ${jwt}`)
+  assert.equal(fromHeader.length, 1)
+  assert.equal(normalizeAccount(fromHeader[0], 0).account.token, jwt)
+})
