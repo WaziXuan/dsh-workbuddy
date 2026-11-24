@@ -312,3 +312,46 @@ test('删除最后一个账号后 pool URL、provider 与凭据一起清空', as
     await env.finish()
   }
 })
+
+test('历史脏 baseURL 自动收敛到默认端点，账号不再被判非法', async () => {
+  const dirty = account('wb-dddddddd')
+  dirty.baseURL = 'https://evil.example.com/v2'
+  const env = await bootstrap({
+    accounts: [dirty],
+    fetchImpl: async () => new Response(JSON.stringify({ code: 0, data: { TotalCredits: 100 } }), { status: 200 }),
+  })
+  try {
+    for (let i = 0; i < 50 && env.mutations.length === 0; i += 1) await sleep(20)
+    const state = await env.call('/workbuddy/state')
+    assert.equal(state.status, 200)
+    const only = state.json().accounts[0]
+    assert.equal(only.baseURL, 'https://copilot.tencent.com/v2', '非官方端点必须回落默认值而不是留着报错')
+    assert.equal(only.baseURLAllowed, true)
+  } finally {
+    await env.finish()
+  }
+})
+
+test('上次失败的余额快照不会被继承，重新导入后取新结果', async () => {
+  const token = 'fake-token-for-stale-balance'
+  const uid = 'uid-stale'
+  const existing = account(routeFor(token, uid), uid)
+  existing.lastBalance = { ok: false, status: 0, fetchedAt: 1, source: 'personal', message: 'baseURL 不被允许，已拒绝发送账号凭据' }
+  const env = await bootstrap({
+    accounts: [existing],
+    fetchImpl: async () => new Response(JSON.stringify({ code: 0, data: { TotalCredits: 200 } }), { status: 200 }),
+  })
+  try {
+    for (let i = 0; i < 50 && env.mutations.length === 0; i += 1) await sleep(20)
+    const response = await env.call('/workbuddy/import', {
+      text: JSON.stringify({ accessToken: token, uid, name: 'stale' }),
+    })
+    assert.equal(response.status, 200)
+    const stored = JSON.parse(fs.readFileSync(env.file, 'utf8'))
+    assert.equal(stored.accounts.length, 1)
+    assert.doesNotMatch(JSON.stringify(stored.accounts[0].lastBalance), /baseURL 不被允许/, '旧错误不得被带到新记录')
+    assert.equal(stored.accounts[0].lastBalance.ok, true)
+  } finally {
+    await env.finish()
+  }
+})
