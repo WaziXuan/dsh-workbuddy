@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { loadCatalog, selectModels } from '../lib/catalog.js'
-import { collectAccountObjects, normalizeAccount } from '../lib/index.js'
+import { collectAccountObjects, normalizeAccount, reasoningEffortsFor } from '../lib/index.js'
 
 test('fallback 目录保留 friendly / reasoning 标记', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-workbuddy-catalog-'))
@@ -122,4 +122,52 @@ test('账号缺少 baseURL 时按默认端点处理，不被白名单拒绝', as
   const result = normalizeAccount({ accessToken: 'x'.repeat(40) }, 0)
   assert.equal(result.ok, true)
   assert.equal(result.account.baseURL, 'https://copilot.tencent.com/v2')
+})
+
+test('官方目录的 supportedEfforts 被解析成思考档位', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-workbuddy-efforts-'))
+  const previous = process.env.WORKBUDDY_HOME
+  process.env.WORKBUDDY_HOME = home
+  try {
+    const file = path.join(home, 'scoped', 'acc-product-config-v3-test.json')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({
+      'product-config-snapshot': {
+        data: {
+          models: [
+            {
+              id: 'a-think', name: 'A', supportsReasoning: true, onlyReasoning: true,
+              reasoning: { supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true },
+            },
+            {
+              id: 'b-fixed', name: 'B', supportsReasoning: true, onlyReasoning: true,
+              reasoning: { effort: 'medium' },
+            },
+          ],
+        },
+      },
+    }))
+    const catalog = loadCatalog()
+    assert.equal(catalog.source, 'local')
+    const a = catalog.models.find((model) => model.id === 'a-think')
+    const b = catalog.models.find((model) => model.id === 'b-fixed')
+    assert.deepEqual(a.efforts, ['low', 'high', 'max'])
+    assert.equal(a.canDisable, true)
+    assert.equal(a.defaultEffort, 'high')
+    assert.deepEqual(b.efforts, ['medium'], '固定 effort 的模型也要保留它的档位')
+  } finally {
+    if (previous === undefined) delete process.env.WORKBUDDY_HOME
+    else process.env.WORKBUDDY_HOME = previous
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('reasoningEfforts：能关思考的模型给 off + 官方档位，固定档位不给控件', () => {
+  const withOff = reasoningEffortsFor({ efforts: ['low', 'high', 'max'], canDisable: true })
+  assert.deepEqual(withOff, { off: null, low: 'low', high: 'high', max: 'max' })
+  const noOff = reasoningEffortsFor({ efforts: ['high', 'xhigh'], canDisable: false })
+  assert.deepEqual(noOff, { high: 'high', xhigh: 'xhigh' })
+  assert.equal(reasoningEffortsFor({ efforts: ['medium'], canDisable: false }), undefined, '单个固定档位没有可选空间')
+  assert.equal(reasoningEffortsFor({ efforts: [], canDisable: true }), undefined)
+  assert.equal(reasoningEffortsFor(undefined), undefined)
 })
