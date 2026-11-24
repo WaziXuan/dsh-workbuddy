@@ -326,8 +326,19 @@ def main():
         allow = "放行" if item.get("baseURLAllowed") else "被拒"
         say("    baseURL=%s（%s）" % (base, allow))
         balance = item.get("balance") or {}
+        remain, total = balance.get("remain"), balance.get("total")
         if balance.get("message"):
             say("    余额：%s" % balance["message"])
+        elif balance.get("ok") and isinstance(remain, (int, float)):
+            plan = balance.get("plan") or balance.get("source") or ""
+            say("    余额：剩 %s / 共 %s 积分%s" % (
+                remain, total if isinstance(total, (int, float)) else "?",
+                "（%s）" % plan if plan else "",
+            ))
+        elif balance.get("ok"):
+            say("    余额：查询成功")
+        else:
+            say("    余额：尚未查询（点面板「刷新余额」）")
     say("")
     say("回 DSH 模型选择器选 WorkBuddy 即可。")
 
