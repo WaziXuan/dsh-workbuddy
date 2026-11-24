@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { loadCatalog, selectModels } from '../lib/catalog.js'
-import { normalizeAccount } from '../lib/index.js'
+import { collectAccountObjects, normalizeAccount } from '../lib/index.js'
 
 test('fallback 目录保留 friendly / reasoning 标记', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-workbuddy-catalog-'))
@@ -58,4 +58,47 @@ test('完整 chat URL 与尾斜杠 baseURL 都归一到 API 根', () => {
   assert.equal(fromChatUrl.ok, true)
   assert.equal(fromChatUrl.account.baseURL, 'https://copilot.tencent.com/v2')
   assert.equal(fromTrailingSlash.account.baseURL, 'https://copilot.tencent.com/v2')
+})
+
+test('账号收集支持 map 结构（键为邮箱）并能归一化', () => {
+  const text = JSON.stringify({
+    version: 1,
+    current: 'a@example.com',
+    users: {
+      'a@example.com': { accessToken: 'a'.repeat(40), uid: 'uid-a' },
+      'b@example.com': { accessToken: 'b'.repeat(40), uid: 'uid-b' },
+    },
+  })
+  const candidates = collectAccountObjects(text)
+  assert.equal(candidates.length, 2)
+  const first = normalizeAccount(candidates[0], 0)
+  assert.equal(first.ok, true)
+  assert.equal(first.account.name, 'a@example.com')
+  assert.equal(first.account.uid, 'uid-a')
+})
+
+test('账号收集支持任意深度嵌套与祖先字段合并', () => {
+  const text = JSON.stringify({
+    uid: 'top-uid',
+    data: { state: { session: { auth: { accessToken: 'c'.repeat(40) } } } },
+  })
+  const candidates = collectAccountObjects(text)
+  assert.equal(candidates.length, 1)
+  const result = normalizeAccount(candidates[0], 0)
+  assert.equal(result.ok, true)
+  assert.equal(result.account.uid, 'top-uid')
+})
+
+test('账号收集仍支持数组形式', () => {
+  const text = JSON.stringify({ accounts: [{ accessToken: 'd'.repeat(40) }, { accessToken: 'e'.repeat(40) }] })
+  assert.equal(collectAccountObjects(text).length, 2)
+})
+
+test('整个文件是加密信封时给出可操作提示', () => {
+  const text = JSON.stringify({ $wbEncrypted: 1, envelope: 'QUJDREVGRw==' })
+  const candidates = collectAccountObjects(text)
+  assert.equal(candidates.length, 1)
+  const result = normalizeAccount(candidates[0], 0)
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /加密信封/)
 })
