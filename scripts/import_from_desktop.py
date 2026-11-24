@@ -103,6 +103,32 @@ def discover_port(token, preferred):
     die("没有找到 dsh-workbuddy 面板端口。确认 DSH 正在运行，或用 --port 指定。")
 
 
+def build_account_payload(session):
+    """只挑插件需要的字段。
+
+    不能整个 session 直接丢给插件：客户端会话里还有一个 `models` 字段，
+    插件会把它当成"只导入这些模型"的过滤器，而它的 id 和本机产品目录对不上，
+    结果就是 0 个模型。这里显式只带 accessToken / uid / 名称。
+    """
+    auth = session.get("auth") or {}
+    account = session.get("account") or {}
+    payload = {"accessToken": auth.get("accessToken"), "uid": account.get("uid")}
+    for key in ("nickname", "displayName", "email"):
+        value = account.get(key)
+        if isinstance(value, str) and value.strip():
+            payload["name"] = value.strip()
+            break
+    for key in ("enterpriseId", "tenantId"):
+        value = account.get(key)
+        if isinstance(value, str) and value.strip():
+            payload["enterpriseId"] = value.strip()
+            break
+    declared = account.get("type") or account.get("accountType")
+    if isinstance(declared, str) and declared.strip():
+        payload["product"] = declared.strip()
+    return payload
+
+
 def main():
     parser = argparse.ArgumentParser(description="从本机 WorkBuddy 登录态导入 DSH 账号池")
     parser.add_argument("--port", type=int, default=0, help="DSH 面板端口（默认自动探测）")
@@ -134,7 +160,8 @@ def main():
     port = discover_port(panel_token, args.port)
     print("DSH 端口 : %d" % port)
 
-    payload = {"text": json.dumps(session, ensure_ascii=False)}
+    account_payload = build_account_payload(session)
+    payload = {"text": json.dumps(account_payload, ensure_ascii=False)}
     if args.test:
         payload["test"] = True
     if args.replace:
@@ -149,6 +176,15 @@ def main():
         die("导入失败：%s" % error)
 
     if not result.get("ok"):
+        # 失败时顺带把插件读到的模型目录打出来，省得来回试
+        try:
+            _, catalog = request(port, "/workbuddy/catalog", panel_token, timeout=5)
+            print("目录诊断：source=%s count=%s" % (catalog.get("source"), catalog.get("count")))
+            ids = [m.get("id") for m in (catalog.get("models") or [])][:8]
+            if ids:
+                print("  示例模型：%s" % ", ".join(str(i) for i in ids))
+        except Exception:
+            pass
         die("导入失败：%s" % json.dumps(result, ensure_ascii=False)[:500])
 
     added = result.get("results", [])
