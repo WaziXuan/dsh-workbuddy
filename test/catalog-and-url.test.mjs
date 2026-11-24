@@ -113,3 +113,13 @@ test('允许直接粘贴裸 token 或 Authorization 请求头', () => {
   assert.equal(fromHeader.length, 1)
   assert.equal(normalizeAccount(fromHeader[0], 0).account.token, jwt)
 })
+
+test('账号缺少 baseURL 时按默认端点处理，不被白名单拒绝', async () => {
+  const { isAllowedBaseURL } = await import('../lib/hosts.js')
+  assert.equal(isAllowedBaseURL(undefined), true, '未指定端点应视为使用默认值')
+  assert.equal(isAllowedBaseURL(''), true)
+  assert.equal(isAllowedBaseURL('https://attacker.example/v2'), false, '显式非法值仍要拒绝')
+  const result = normalizeAccount({ accessToken: 'x'.repeat(40) }, 0)
+  assert.equal(result.ok, true)
+  assert.equal(result.account.baseURL, 'https://copilot.tencent.com/v2')
+})
