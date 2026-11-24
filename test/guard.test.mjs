@@ -145,3 +145,31 @@ test('改写 body 后删除过期的 content-length', async () => {
     globalThis.fetch = realFetch
   }
 })
+
+test('探针半开：保留 system 补位，跳过注入，不计 rewrites', async () => {
+  const calls = []
+  globalThis.fetch = async (url, init) => { calls.push({ url, init }); return new Response('{}', { status: 200 }) }
+  const guard = installFetchGuard(QUIET_LOGGER, {
+    injectSystem: (system) => `${system}\nINJECTED`,
+    injectUserTail: (text) => `${text}\nTAIL`,
+  })
+  try {
+    await fetch(TARGET, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': 'deepseek-harness/0.2.1', 'x-dsh-workbuddy-probe': '1' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }),
+    })
+    assert.equal(guard.stats().rewrites, 0)
+    assert.equal(guard.stats().probes, 1)
+    const sent = calls[0]
+    const headers = new Headers(sent.init.headers)
+    assert.equal(headers.get('x-dsh-workbuddy-probe'), null)
+    const payload = JSON.parse(sent.init.body)
+    assert.equal(payload.messages[0].role, 'system')
+    assert.ok(!payload.messages[0].content.includes('INJECTED'))
+    assert.ok(!JSON.stringify(payload).includes('TAIL'))
+  } finally {
+    guard.dispose()
+    globalThis.fetch = realFetch
+  }
+})
