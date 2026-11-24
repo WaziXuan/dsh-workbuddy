@@ -38,7 +38,7 @@ function installMockUpstream({ total = 40, interval = 20, firstByteDelay = 0 }) 
 }
 
 function makePool(accounts = [ACCOUNT]) {
-  return startPool({ getAccounts: () => accounts, logger: QUIET_LOGGER })
+  return startPool({ getAccounts: () => accounts, logger: QUIET_LOGGER, validateBaseURL: () => true })
 }
 
 async function postChat(url, signal) {

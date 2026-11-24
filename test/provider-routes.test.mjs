@@ -22,7 +22,7 @@ test('applyPool 只清理 wb-* 旧账号路由，保留其他 provider', async (
     accounts: [{
       id: 'fake0001', route: 'wb-fake0001', credentialRef: 'WORKBUDDY_FAKE',
       name: 'fake', token: 'not-a-real-token', uid: null, enterpriseId: null,
-      product: 'personal', baseURL: 'http://upstream.invalid/v2', modelFilter: null,
+      product: 'personal', baseURL: 'http://127.0.0.1:9/v2', modelFilter: null,
     }],
   }))
 

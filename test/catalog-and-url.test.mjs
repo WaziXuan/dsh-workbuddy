@@ -45,6 +45,12 @@ test('账号身份按 uid + 企业 ID 稳定，token 轮换不换 route', () => 
   assert.notEqual(otherTenant.account.route, first.account.route)
 })
 
+test('file/ftp 等非 http(s) baseURL 被拒绝', () => {
+  const source = { accessToken: 'x'.repeat(32), uid: 'uid-1' }
+  assert.equal(normalizeAccount({ ...source, baseURL: 'file:///etc/passwd' }, 0).ok, false)
+  assert.equal(normalizeAccount({ ...source, baseURL: 'ftp://example.com/v2' }, 0).ok, false)
+})
+
 test('完整 chat URL 与尾斜杠 baseURL 都归一到 API 根', () => {
   const source = { accessToken: 'x'.repeat(32), uid: 'uid-1' }
   const fromChatUrl = normalizeAccount({ ...source, baseURL: 'https://copilot.tencent.com/v2/chat/completions' }, 0)

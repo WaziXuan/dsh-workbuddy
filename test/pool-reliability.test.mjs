@@ -19,7 +19,7 @@ function account(route, modelFilter = null) {
 }
 
 async function makePool(accounts) {
-  return startPool({ getAccounts: () => accounts, logger: QUIET_LOGGER })
+  return startPool({ getAccounts: () => accounts, logger: QUIET_LOGGER, validateBaseURL: () => true })
 }
 
 async function post(pool, model = 'test-model') {
@@ -146,12 +146,31 @@ test('连接失败的账号进入冷却，后续请求不反复陪跑', async ()
   }
 })
 
+test('账号存储抛错时请求返回 500，进程不因未捕获异常退出', async () => {
+  const pool = await startPool({
+    getAccounts: () => { throw new Error('mock corrupted accounts.json') },
+    logger: QUIET_LOGGER,
+    validateBaseURL: () => true,
+  })
+  try {
+    const response = await realFetch(`${pool.url}/chat/completions`, {
+      method: 'POST',
+      body: JSON.stringify({ model: 'test-model' }),
+    })
+    assert.equal(response.status, 500)
+    assert.match(await response.text(), /mock corrupted accounts\.json/)
+  } finally {
+    await pool.dispose()
+  }
+})
+
 test('池数据面要求正确的 bearer key', async () => {
   globalThis.fetch = async () => okResponse()
   const pool = await startPool({
     getAccounts: () => [account('a')],
     logger: QUIET_LOGGER,
     authKey: 'pool-secret-key',
+    validateBaseURL: () => true,
   })
   try {
     const body = JSON.stringify({ model: 'test-model', stream: true })

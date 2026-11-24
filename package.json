@@ -57,6 +57,6 @@
     "@deepseek-ai/cordis": "^4.0.1"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/pool-abort.test.mjs test/pool-reliability.test.mjs test/provider-routes.test.mjs test/pool-startup.test.mjs test/account-store.test.mjs test/guard.test.mjs test/catalog-and-url.test.mjs"
+    "test": "node --test --test-concurrency=1 test/pool-abort.test.mjs test/pool-reliability.test.mjs test/provider-routes.test.mjs test/pool-startup.test.mjs test/account-store.test.mjs test/guard.test.mjs test/catalog-and-url.test.mjs test/purge.test.mjs"
   }
 }

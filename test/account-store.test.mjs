@@ -20,7 +20,7 @@ function account(route, uid = `uid-${route}`) {
   return {
     id: route.slice(3), route, credentialRef: `WORKBUDDY_${route.toUpperCase()}_API_KEY`,
     name: route, token: `fake-token-for-${route}`, uid, enterpriseId: null,
-    product: 'personal', baseURL: 'http://upstream.invalid/v2', modelFilter: null,
+    product: 'personal', baseURL: 'http://127.0.0.1:9/v2', modelFilter: null,
     createdAt: 1000, lastTest: null, lastBalance: null,
   }
 }
@@ -84,10 +84,11 @@ async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', 
   }
   apply(ctx, {})
   const panelToken = fs.readFileSync(path.join(home, 'workbuddy', 'http-token'), 'utf8').trim()
-  const call = async (routePath, body = {}, headers = {}) => {
+  const call = async (routePath, body = {}, headers = {}, socket = { remoteAddress: '127.0.0.1', localPort: 34567 }) => {
     const response = responseSink()
     const request = new EventEmitter()
     request.method = 'POST'
+    request.socket = socket
     request.headers = {
       host: '127.0.0.1:34567',
       authorization: `Bearer ${panelToken}`,
