@@ -146,6 +146,31 @@ test('连接失败的账号进入冷却，后续请求不反复陪跑', async ()
   }
 })
 
+test('池数据面要求正确的 bearer key', async () => {
+  globalThis.fetch = async () => okResponse()
+  const pool = await startPool({
+    getAccounts: () => [account('a')],
+    logger: QUIET_LOGGER,
+    authKey: 'pool-secret-key',
+  })
+  try {
+    const body = JSON.stringify({ model: 'test-model', stream: true })
+    const missing = await realFetch(`${pool.url}/chat/completions`, { method: 'POST', body })
+    const wrong = await realFetch(`${pool.url}/chat/completions`, {
+      method: 'POST', body, headers: { authorization: 'Bearer wrong' },
+    })
+    const good = await realFetch(`${pool.url}/chat/completions`, {
+      method: 'POST', body, headers: { authorization: 'Bearer pool-secret-key' },
+    })
+    assert.equal(missing.status, 401)
+    assert.equal(wrong.status, 401)
+    assert.equal(good.status, 200)
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+  }
+})
+
 test('背压：写缓冲区满时等待 drain', async () => {
   class FakeResponse extends EventEmitter {
     write() { return false }

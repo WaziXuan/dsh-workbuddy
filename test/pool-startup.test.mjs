@@ -59,10 +59,12 @@ test('并发 ensurePool 只产生一个监听 URL', async () => {
     apply(ctx, {})
     const applyRoute = routes.get('/workbuddy/apply')
     assert.ok(applyRoute, 'apply 路由应已注册')
+    const panelToken = fs.readFileSync(path.join(home, 'workbuddy', 'http-token'), 'utf8').trim()
+    const headers = { host: '127.0.0.1:34567', authorization: `Bearer ${panelToken}` }
     // 与 queueMicrotask 里的启动自动恢复重叠，覆盖启动竞态窗口。
     await Promise.all([
-      applyRoute({ method: 'POST', headers: {} }, fakeResponse()),
-      applyRoute({ method: 'POST', headers: {} }, fakeResponse()),
+      applyRoute({ method: 'POST', headers }, fakeResponse()),
+      applyRoute({ method: 'POST', headers }, fakeResponse()),
     ])
     assert.ok(poolUrls.length >= 2)
     assert.equal(new Set(poolUrls).size, 1, `并发 apply 产生了多个池：${poolUrls.join(', ')}`)

@@ -36,7 +36,7 @@ function responseSink() {
   }
 }
 
-async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', { status: 200 }), unsetDelay = async () => {} }) {
+async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', { status: 200 }), unsetDelay = async () => {}, setFailure = () => false }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-workbuddy-store-'))
   const file = path.join(home, 'workbuddy', 'accounts.json')
   const previousDsh = process.env.DSH_HOME
@@ -45,6 +45,7 @@ async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', 
   const routes = new Map()
   const mutations = []
   const credentialOps = []
+  const credentialValues = new Map()
   process.env.DSH_HOME = home
   process.env.WORKBUDDY_HOME = path.join(home, 'empty-catalog')
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -63,8 +64,13 @@ async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', 
     },
   }
   const credentials = {
-    set: async (ref, value) => { credentialOps.push({ op: 'set', ref, value }) },
-    unset: async (ref) => { await unsetDelay(ref); credentialOps.push({ op: 'unset', ref }) },
+    set: async (ref, value) => {
+      if (setFailure(ref, value)) throw new Error('mock credential write failure')
+      credentialValues.set(ref, value)
+      credentialOps.push({ op: 'set', ref, value })
+    },
+    get: async (ref) => credentialValues.get(ref),
+    unset: async (ref) => { await unsetDelay(ref); credentialValues.delete(ref); credentialOps.push({ op: 'unset', ref }) },
   }
   const ctx = {
     logger: { info() {}, warn() {} },
@@ -77,11 +83,16 @@ async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', 
     webServer: { register: (spec) => { routes.set(spec.path, spec.handler); return () => {} } },
   }
   apply(ctx, {})
-  const call = async (routePath, body = {}) => {
+  const panelToken = fs.readFileSync(path.join(home, 'workbuddy', 'http-token'), 'utf8').trim()
+  const call = async (routePath, body = {}, headers = {}) => {
     const response = responseSink()
     const request = new EventEmitter()
     request.method = 'POST'
-    request.headers = {}
+    request.headers = {
+      host: '127.0.0.1:34567',
+      authorization: `Bearer ${panelToken}`,
+      ...headers,
+    }
     const payload = Buffer.from(JSON.stringify(body))
     queueMicrotask(() => {
       request.emit('data', payload)
@@ -101,7 +112,7 @@ async function bootstrap({ accounts, fetchImpl = async () => new Response('{}', 
     globalThis.fetch = realFetch
     fs.rmSync(home, { recursive: true, force: true })
   }
-  return { file, routes, mutations, credentialOps, call, finish }
+  return { file, routes, mutations, credentialOps, credentialValues, panelToken, call, finish }
 }
 
 test('replace 遇无效账号整次拒绝，不碰原账号文件', async () => {
@@ -205,7 +216,81 @@ test('同 uid 换 token 沿用旧 route，不会在池里留下重复账号', as
     const stored = JSON.parse(fs.readFileSync(env.file, 'utf8'))
     assert.equal(stored.accounts.length, 1)
     assert.equal(stored.accounts[0].route, 'wb-legacy01')
-    assert.equal(stored.accounts[0].token, 'new-token-for-stable-uid-0001')
+    assert.equal(stored.accounts[0].token, undefined, 'accounts.json 不允许残留明文 token')
+    assert.equal(env.credentialValues.get(stored.accounts[0].credentialRef), 'new-token-for-stable-uid-0001')
+  } finally {
+    await env.finish()
+  }
+})
+
+test('启动时把旧明文 token 搬进凭据服务，accounts.json 不再含 token', async () => {
+  const old = account('wb-deadbeef')
+  old.token = 'legacy-plaintext-token-0001'
+  const env = await bootstrap({ accounts: [old] })
+  try {
+    for (let i = 0; i < 50; i += 1) {
+      const snapshot = JSON.parse(fs.readFileSync(env.file, 'utf8'))
+      if (snapshot.accounts[0]?.token === undefined) break
+      await sleep(20)
+    }
+    const stored = JSON.parse(fs.readFileSync(env.file, 'utf8'))
+    assert.equal(stored.accounts.length, 1)
+    assert.equal(stored.accounts[0].token, undefined)
+    assert.equal(env.credentialValues.get(stored.accounts[0].credentialRef), 'legacy-plaintext-token-0001')
+    const state = await env.call('/workbuddy/state')
+    assert.equal(state.status, 200)
+    assert.notEqual(state.json().accounts[0].token, 'legacy-plaintext-token-0001')
+  } finally {
+    await env.finish()
+  }
+})
+
+test('凭据写入失败时保留旧 token，后续其他写操作也不能把它抹掉', async () => {
+  const old = account('wb-deadbeef')
+  old.token = 'legacy-token-that-cannot-migrate'
+  const env = await bootstrap({
+    accounts: [old],
+    setFailure: (ref) => ref.includes('DEADBEEF'),
+    fetchImpl: async () => new Response('data: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+  })
+  try {
+    for (let i = 0; i < 50 && env.mutations.length === 0; i += 1) await sleep(20)
+    assert.equal(JSON.parse(fs.readFileSync(env.file, 'utf8')).accounts[0].token, 'legacy-token-that-cannot-migrate')
+    const response = await env.call('/workbuddy/test', { route: old.route })
+    assert.equal(response.status, 200)
+    assert.equal(JSON.parse(fs.readFileSync(env.file, 'utf8')).accounts[0].token, 'legacy-token-that-cannot-migrate')
+  } finally {
+    await env.finish()
+  }
+})
+
+test('管理接口没有 bearer 或 bearer 错误时返回 401，且不改文件', async () => {
+  const env = await bootstrap({ accounts: [account('wb-deadbeef')] })
+  try {
+    for (let i = 0; i < 50 && env.mutations.length === 0; i += 1) await sleep(20)
+    const before = fs.readFileSync(env.file)
+    const missing = await env.call('/workbuddy/state', {}, { authorization: '' })
+    const wrong = await env.call('/workbuddy/import', { text: '{}' }, { authorization: 'Bearer wrong' })
+    assert.equal(missing.status, 401)
+    assert.equal(wrong.status, 401)
+    assert.deepEqual(fs.readFileSync(env.file), before)
+    const good = await env.call('/workbuddy/state')
+    assert.equal(good.status, 200)
+  } finally {
+    await env.finish()
+  }
+})
+
+test('面板 session 需要自定义头与回环 Host', async () => {
+  const env = await bootstrap({ accounts: [] })
+  try {
+    const noHeader = await env.call('/workbuddy/session')
+    assert.equal(noHeader.status, 403)
+    const evilHost = await env.call('/workbuddy/session', {}, { host: 'attacker.example:34567', 'x-dsh-workbuddy-panel': '1' })
+    assert.equal(evilHost.status, 403)
+    const good = await env.call('/workbuddy/session', {}, { 'x-dsh-workbuddy-panel': '1' })
+    assert.equal(good.status, 200)
+    assert.equal(good.json().token, env.panelToken)
   } finally {
     await env.finish()
   }

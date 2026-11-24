@@ -102,7 +102,8 @@ test('还在等首包时下游断开 → 挂起的 fetch 也要被 abort', async
   try {
     const clientAbort = new AbortController()
     const pending = postChat(pool.url, clientAbort.signal).catch(() => null)
-    await sleep(60)
+    // 等到池子真的向上游发出请求后再断开，避免在读完请求体之前 abort 导致没走到上游。
+    for (let i = 0; i < 30 && upstream.calls === 0; i += 1) await sleep(10)
     clientAbort.abort()
     await pending
     await sleep(100)
