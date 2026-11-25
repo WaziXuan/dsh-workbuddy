@@ -12,3 +12,7 @@ Thumbs.db
 
 # local notes
 _research/
+
+# python caches
+__pycache__/
+*.pyc

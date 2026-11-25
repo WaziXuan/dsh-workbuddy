@@ -259,7 +259,7 @@ def main():
     say("登录文件 : %s" % auth_file)
     say("凭据格式 : %s" % ("$wbEncrypted（已由 WorkBuddy 运行时解密）" if encrypted else "明文"))
     say("uid      : %s" % (uid or "(缺失)"))
-    say("token    : len=%d head=%s…" % (len(token), token[:8]))
+    say("token    : 已读取（len=%d，不显示内容）" % len(token))
     if not token or not uid:
         die("登录态缺少 accessToken 或 uid，先在客户端里重新登录一次")
 
