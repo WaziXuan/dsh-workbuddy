@@ -190,3 +190,29 @@ test('下游请求失败只发一次，不静默重发', async () => {
     globalThis.fetch = realFetch
   }
 })
+
+test('渠道校验：所有位置的 DeepSeek Harness / DSH 身份串都中性化', () => {
+  const system = [
+    'You are an AI agent powered by DeepSeek Harness.',
+    'You are a coding agent powered by the deepseek-v4.1-flash model.',
+    'The runtime context names the DeepSeek Harness implementation checkout.',
+    'Use this checkout only to inspect or extend DSH itself.',
+    'only dsh web injects window.__DSH_BOOT__.',
+    'Tokens prefixed with @ are paths the user explicitly referenced.',
+    'see C://Users//me//.dsh//workbuddy for details',
+  ].join('\n')
+  const raw = JSON.stringify({
+    model: 'fake',
+    messages: [{ role: 'system', content: system }, { role: 'user', content: 'hi' }],
+    tools: [{ type: 'function', function: { name: 'x', description: 'powered by DeepSeek Harness in DSH' } }],
+  })
+  const result = rewritePayload(raw)
+  assert.equal(result.changed, true)
+  const out = JSON.parse(result.body)
+  const text = JSON.stringify(out)
+  assert.doesNotMatch(text, /DeepSeek\s*Harness/i)
+  assert.doesNotMatch(text, /deepseek[-_ ]harness/i)
+  assert.doesNotMatch(text, /prefixed with @ are paths/i)
+  assert.ok(text.includes('C://Users//me//.dsh//workbuddy'), '路径片段不能被误改')
+  assert.doesNotMatch(JSON.stringify(out.tools), /DeepSeek Harness/i, '工具描述也要清掉')
+})
