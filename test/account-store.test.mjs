@@ -355,3 +355,24 @@ test('上次失败的余额快照不会被继承，重新导入后取新结果',
     await env.finish()
   }
 })
+
+test('真正下发给 DSH 的池 profile 里带 reasoningEfforts', async () => {
+  const only = account('wb-eeeeeeee')
+  const env = await bootstrap({ accounts: [only] })
+  try {
+    for (let i = 0; i < 50 && env.mutations.length === 0; i += 1) await sleep(20)
+    const applied = env.mutations
+      .filter((op) => op.op === 'set' && op.path.at(-1) === 'workbuddy')
+      .map((op) => op.value)
+      .pop()
+    assert.ok(applied, '必须把池 provider 写进 settings')
+    const flash = applied.models.find((model) => model.id === 'deepseek-v4.1-flash')
+    assert.ok(flash, '兜底目录里应有 deepseek-v4.1-flash')
+    assert.deepEqual(flash.reasoningEfforts, { off: null, low: 'low', high: 'high' },
+      '池 profile 必须带上档位，否则模型选择器不给「思考程度」')
+    const fixed = applied.models.find((model) => model.id === 'glm-5.3')
+    assert.deepEqual(fixed.reasoningEfforts, { low: 'low', high: 'high' }, '不可关思考的模型不应带 off')
+  } finally {
+    await env.finish()
+  }
+})
