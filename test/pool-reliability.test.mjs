@@ -271,3 +271,91 @@ test('两个账号都被 11128 拦下时，把上游原文回给下游', async (
     fs.rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('国际版端点自动补 Origin/Referer，默认端点保持不动', async () => {
+  const captured = []
+  globalThis.fetch = async (url, init) => {
+    captured.push({ url: String(url), headers: init?.headers ?? {} })
+    return okResponse()
+  }
+  const intl = account('intl')
+  intl.baseURL = 'https://www.workbuddy.ai/v2'
+  const pool = await makePool([intl])
+  try {
+    const { response } = await post(pool)
+    assert.equal(response.status, 200)
+    assert.equal(captured.length, 1)
+    assert.equal(captured[0].headers.origin, 'https://www.workbuddy.ai')
+    assert.equal(captured[0].headers.referer, 'https://www.workbuddy.ai/')
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+  }
+})
+
+test('默认端点不带 Origin/Referer，避免给国内链路引入新变量', async () => {
+  const captured = []
+  globalThis.fetch = async (url, init) => {
+    captured.push(init?.headers ?? {})
+    return okResponse()
+  }
+  const cn = account('cn')
+  cn.baseURL = 'https://copilot.tencent.com/v2'
+  const pool = await makePool([cn])
+  try {
+    await post(pool)
+    assert.equal(captured[0].origin, undefined)
+    assert.equal(captured[0].referer, undefined)
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+  }
+})
+
+test('额度用尽（14018）即便包在 400 里也换号', async () => {
+  const hits = []
+  globalThis.fetch = async (url) => {
+    const host = new URL(url).hostname
+    hits.push(host)
+    if (host === 'quota.invalid') {
+      return new Response(JSON.stringify({ error: { data: { code: 14018, msg: '额度已用尽，请购买加量包' } } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return okResponse()
+  }
+  const pool = await makePool([account('quota'), account('ok')])
+  try {
+    const { response } = await post(pool)
+    assert.equal(response.status, 200, '一个账号额度用尽不该让整轮失败')
+    assert.deepEqual(hits, ['quota.invalid', 'ok.invalid'])
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+  }
+})
+
+test('限流（6004）包在 400 里也换号', async () => {
+  const hits = []
+  globalThis.fetch = async (url) => {
+    const host = new URL(url).hostname
+    hits.push(host)
+    if (host === 'rate.invalid') {
+      return new Response(JSON.stringify({ code: 6004, msg: '您的使用量已超出频率限制，将在稍后重置' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return okResponse()
+  }
+  const pool = await makePool([account('rate'), account('ok')])
+  try {
+    const { response } = await post(pool)
+    assert.equal(response.status, 200)
+    assert.deepEqual(hits, ['rate.invalid', 'ok.invalid'])
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+  }
+})

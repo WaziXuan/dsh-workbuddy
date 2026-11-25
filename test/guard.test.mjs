@@ -216,3 +216,78 @@ test('渠道校验：所有位置的 DeepSeek Harness / DSH 身份串都中性�
   assert.ok(text.includes('C://Users//me//.dsh//workbuddy'), '路径片段不能被误改')
   assert.doesNotMatch(JSON.stringify(out.tools), /DeepSeek Harness/i, '工具描述也要清掉')
 })
+
+test('hybrid 模式：逐句能清干净就保留原有 system 内容', () => {
+  const previous = process.env.WORKBUDDY_GUARD_MODE
+  delete process.env.WORKBUDDY_GUARD_MODE
+  try {
+    const raw = JSON.stringify({
+      model: 'fake',
+      messages: [
+        { role: 'system', content: 'You are a coding agent powered by DeepSeek Harness. Keep answers short.' },
+        { role: 'user', content: 'hi' },
+      ],
+    })
+    const out = JSON.parse(rewritePayload(raw).body)
+    const system = out.messages[0].content
+    assert.doesNotMatch(system, /DeepSeek\s*Harness/i)
+    assert.match(system, /Keep answers short/, '逐句替换没清不干净时不该丢掉整段提示')
+  } finally {
+    if (previous === undefined) delete process.env.WORKBUDDY_GUARD_MODE
+    else process.env.WORKBUDDY_GUARD_MODE = previous
+  }
+})
+
+test('strip 模式：system 整段换成中性文案，但保住工作目录', () => {
+  const previous = process.env.WORKBUDDY_GUARD_MODE
+  process.env.WORKBUDDY_GUARD_MODE = 'strip'
+  try {
+    const raw = JSON.stringify({
+      model: 'fake',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a helpful agent. Your working directory is /work/demo. Read every file before editing.',
+        },
+        { role: 'user', content: 'hi' },
+      ],
+    })
+    const out = JSON.parse(rewritePayload(raw).body)
+    const system = out.messages[0].content
+    assert.match(system, /helpful coding assistant/i)
+    assert.ok(system.includes('/work/demo'), '工作目录是必要上下文，不能被一起清掉')
+    assert.doesNotMatch(system, /Read every file before editing/, '其余自定义规则整段丢弃')
+  } finally {
+    if (previous === undefined) delete process.env.WORKBUDDY_GUARD_MODE
+    else process.env.WORKBUDDY_GUARD_MODE = previous
+  }
+})
+
+test('strip 模式：数组形状的 system 只换文本 part，图片保留', () => {
+  const previous = process.env.WORKBUDDY_GUARD_MODE
+  process.env.WORKBUDDY_GUARD_MODE = 'strip'
+  try {
+    const raw = JSON.stringify({
+      model: 'fake',
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: 'powered by DeepSeek Harness' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+          ],
+        },
+        { role: 'user', content: 'hi' },
+      ],
+    })
+    const out = JSON.parse(rewritePayload(raw).body)
+    const content = out.messages[0].content
+    assert.ok(Array.isArray(content), '数组形状不能被打平成字符串')
+    assert.equal(content.filter((part) => part.type === 'image_url').length, 1, '图片 part 必须原样保留')
+    const text = content.filter((part) => part.type === 'text').map((part) => part.text).join('')
+    assert.doesNotMatch(text, /DeepSeek\s*Harness/i)
+  } finally {
+    if (previous === undefined) delete process.env.WORKBUDDY_GUARD_MODE
+    else process.env.WORKBUDDY_GUARD_MODE = previous
+  }
+})

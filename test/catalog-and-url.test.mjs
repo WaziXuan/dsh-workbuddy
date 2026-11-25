@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { loadCatalog, selectModels } from '../lib/catalog.js'
 import { collectAccountObjects, normalizeAccount, reasoningEffortsFor } from '../lib/index.js'
+import { isAllowedBaseURL, originOfBaseURL } from '../lib/hosts.js'
 
 test('fallback 目录保留 friendly / reasoning 标记', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-workbuddy-catalog-'))
@@ -170,4 +171,33 @@ test('reasoningEfforts：能关思考的模型给 off + 官方档位，固定档
   assert.equal(reasoningEffortsFor({ efforts: ['medium'], canDisable: false }), undefined, '单个固定档位没有可选空间')
   assert.equal(reasoningEffortsFor({ efforts: [], canDisable: true }), undefined)
   assert.equal(reasoningEffortsFor(undefined), undefined)
+})
+
+test('国际版官方域放行，伪装域仍拒绝', () => {
+  const allowed = [
+    'https://www.workbuddy.ai/v2',
+    'https://api.workbuddy.ai/v2',
+    'https://codebuddy.ai/v2',
+    'https://www.codebuddy.cn/v2',
+    'https://copilot.tencent.com/v2',
+  ]
+  for (const url of allowed) assert.equal(isAllowedBaseURL(url), true, `${url} 应该放行`)
+
+  const denied = [
+    'https://evil-workbuddy.ai/v2',
+    'https://workbuddy.ai.evil.com/v2',
+    'http://www.workbuddy.ai/v2',
+    'https://www.workbuddy.ai:8443/v2',
+    'https://user:pw@www.workbuddy.ai/v2',
+  ]
+  for (const url of denied) assert.equal(isAllowedBaseURL(url), false, `${url} 不该放行`)
+
+  assert.equal(isAllowedBaseURL(undefined), true, '缺省端点等价于默认值')
+})
+
+test('originOfBaseURL 取 scheme + host + port', () => {
+  assert.equal(originOfBaseURL('https://www.workbuddy.ai/v2'), 'https://www.workbuddy.ai')
+  assert.equal(originOfBaseURL('http://127.0.0.1:47812/v2'), 'http://127.0.0.1:47812')
+  assert.equal(originOfBaseURL(''), null)
+  assert.equal(originOfBaseURL('not a url'), null)
 })
