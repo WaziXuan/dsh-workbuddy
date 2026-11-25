@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { loadCatalog, selectModels } from '../lib/catalog.js'
-import { collectAccountObjects, normalizeAccount, reasoningEffortsFor } from '../lib/index.js'
+import { collectAccountObjects, normalizeAccount, poolKeyRef, reasoningEffortsFor } from '../lib/index.js'
 import { isAllowedBaseURL, originOfBaseURL } from '../lib/hosts.js'
 
 test('fallback 目录保留 friendly / reasoning 标记', () => {
@@ -200,4 +200,15 @@ test('originOfBaseURL 取 scheme + host + port', () => {
   assert.equal(originOfBaseURL('http://127.0.0.1:47812/v2'), 'http://127.0.0.1:47812')
   assert.equal(originOfBaseURL(''), null)
   assert.equal(originOfBaseURL('not a url'), null)
+})
+
+// 同一个 DSH home 下可能同时跑桌面客户端与远端 web 宿主。credentials 是 home 级共享的，
+// 两边共用 WORKBUDDY_POOL_KEY 会互相覆盖，被覆盖那侧 provider 直接 401。
+test('池 key 的凭据名按端口隔离', () => {
+  assert.equal(poolKeyRef('http://127.0.0.1:47812/v2'), 'WORKBUDDY_POOL_KEY_47812')
+  assert.equal(poolKeyRef('http://127.0.0.1:2209/v2'), 'WORKBUDDY_POOL_KEY_2209')
+  assert.notEqual(poolKeyRef('http://127.0.0.1:47812/v2'), poolKeyRef('http://127.0.0.1:2209/v2'))
+  // 非法地址或省略端口时退回共用名字（单实例场景等价）
+  assert.equal(poolKeyRef('not a url'), 'WORKBUDDY_POOL_KEY')
+  assert.equal(poolKeyRef('http://127.0.0.1/v2'), 'WORKBUDDY_POOL_KEY')
 })
