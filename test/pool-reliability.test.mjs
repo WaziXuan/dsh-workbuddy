@@ -215,3 +215,59 @@ test('背压：等待 drain 期间下游 close 也能退出', async () => {
   assert.equal(response.listenerCount('drain'), 0, '退出后不能残留 drain 监听器')
   assert.equal(response.listenerCount('close'), 0, '退出后不能残留 close 监听器')
 })
+
+test('11128 渠道校验 → 换下一个账号，全部被封才回原文', async () => {
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-wb-block-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  const blocked = JSON.stringify({ code: 11128, msg: 'Illegal API invocation from an unapproved channel' })
+  const calls = []
+  globalThis.fetch = async (url) => {
+    const host = new URL(url).hostname
+    calls.push(host)
+    if (host === 'a.invalid') return new Response(blocked, { status: 400, headers: { 'content-type': 'application/json' } })
+    return okResponse()
+  }
+  const pool = await makePool([account('a'), account('b')])
+  try {
+    const { response } = await post(pool)
+    assert.equal(response.status, 200, '一个账号被渠道校验拦下不该让整次请求失败')
+    assert.deepEqual(calls, ['a.invalid', 'b.invalid'])
+    const report = JSON.parse(fs.readFileSync(path.join(home, 'workbuddy', 'last-blocked.json'), 'utf8'))
+    assert.equal(report.code, 11128)
+    assert.equal(report.model, 'test-model')
+    assert.ok(Array.isArray(report.suspicious), '现场只记线索片段')
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('两个账号都被 11128 拦下时，把上游原文回给下游', async () => {
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-wb-block2-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  const blocked = JSON.stringify({ code: 11128, msg: 'Illegal API invocation from an unapproved channel' })
+  globalThis.fetch = async () => new Response(blocked, { status: 400, headers: { 'content-type': 'application/json' } })
+  const pool = await makePool([account('a'), account('b')])
+  try {
+    const { response, text } = await post(pool)
+    assert.equal(response.status, 400)
+    assert.match(text, /11128/)
+  } finally {
+    await pool.dispose()
+    globalThis.fetch = realFetch
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
